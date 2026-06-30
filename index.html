@@ -234,6 +234,31 @@
         <div class="workgrid">
           <div class="panel">
             <div class="field">
+              <label for="monthlyMode">Tipo de inicio</label>
+              <select id="monthlyMode">
+                <option>Primera vez</option>
+                <option>Actualizar base existente</option>
+              </select>
+            </div>
+            <div class="field" id="startYearField">
+              <label for="monthlyStartYear">Ano base</label>
+              <select id="monthlyStartYear">
+                <option>2024</option>
+                <option selected>2025</option>
+                <option>2026</option>
+              </select>
+            </div>
+            <div class="field" id="openingBalanceField">
+              <label for="openingBalanceFile">Archivo de saldo inicial</label>
+              <input id="openingBalanceFile" type="file" accept=".xlsx,.xls">
+              <p class="small">Este archivo sirve como punto de arranque del comparativo.</p>
+            </div>
+            <div class="field hidden" id="previousReportField">
+              <label for="previousReportFile">Comparativo mensual anterior</label>
+              <input id="previousReportFile" type="file" accept=".xlsx,.xls">
+              <p class="small">Carga una version exportada antes para conservar su trazabilidad.</p>
+            </div>
+            <div class="field">
               <label for="monthlyFiles">Balances mensuales en Excel</label>
               <input id="monthlyFiles" type="file" accept=".xlsx,.xls" multiple>
               <p class="small">Puedes seleccionar varios archivos. Si el periodo no viene en el archivo, se toma del nombre.</p>
@@ -283,7 +308,7 @@
   </div>
 
   <script>
-    const MONEY_COLUMNS = new Set(["Valor", "Saldo inicial", "Debito", "Credito", "Saldo final", "Activo", "Pasivo", "Patrimonio", "Ingresos", "Costos", "Gastos", "Resultado", "Diferencia"]);
+    const MONEY_COLUMNS = new Set(["Valor", "Saldo", "Movimiento", "Ventas", "Utilidad bruta", "Utilidad operacional", "EBITDA", "Saldo inicial", "Debito", "Credito", "Saldo final", "Activo", "Pasivo", "Patrimonio", "Ingresos", "Costos", "Gastos", "Resultado", "Diferencia", "Activos", "Pasivos", "Activos corrientes", "Pasivos corrientes", "Diferencia de cuadre"]);
     const state = { monthlyWorkbook: null, niifWorkbook: null, niifPrintHtml: "" };
 
     document.querySelectorAll(".nav button").forEach((button) => {
@@ -344,46 +369,92 @@
       });
     }
 
+    function columnKind(header) {
+      const text = normalizeText(header);
+      if (!text) return "";
+      if ((text.includes("CODIGO") && text.includes("CUENTA")) || text === "CODIGO" || text.includes("COD CTA") || text.includes("CTA CONTABLE")) return "code";
+      if ((text.includes("NOMBRE") && text.includes("CUENTA")) || (text.includes("DESCRIPCION") && text.includes("CUENTA")) || text === "CUENTA") return "name";
+      if (text.includes("IDENTIFICACION") || text === "NIT" || text.includes("DOCUMENTO")) return "thirdId";
+      if (text.includes("NOMBRE") && text.includes("TERCERO") || text === "TERCERO" || text.includes("RAZON SOCIAL")) return "thirdName";
+      if (text.includes("SALDO") && text.includes("INICIAL")) return "opening";
+      if (text.includes("DEBITO") || text.includes("DEBITOS")) return "debit";
+      if (text.includes("CREDITO") || text.includes("CREDITOS")) return "credit";
+      if ((text.includes("SALDO") && text.includes("FINAL")) || text === "FINAL" || text.includes("NUEVO SALDO")) return "closing";
+      return "";
+    }
+
+    function codeLike(value) {
+      const code = String(value ?? "").replace(/\.0$/, "").replace(/\D/g, "");
+      return code.length >= 4 && code.length <= 12;
+    }
+
+    function numericLike(value) {
+      if (typeof value === "number") return Number.isFinite(value);
+      const text = String(value ?? "").trim();
+      return /[0-9]/.test(text) && /[$.,()-]/.test(text);
+    }
+
+    function inferColumns(rows, startIndex) {
+      const sample = rows.slice(startIndex, Math.min(rows.length, startIndex + 120));
+      const width = Math.max(...sample.map((row) => row.length), 0);
+      const stats = Array.from({ length: width }, (_, col) => ({
+        col,
+        codes: 0,
+        numbers: 0,
+        text: 0
+      }));
+      sample.forEach((row) => {
+        stats.forEach((item) => {
+          const value = row[item.col];
+          if (codeLike(value)) item.codes += 1;
+          if (numericLike(value) || typeof value === "number") item.numbers += 1;
+          if (String(value ?? "").trim().length > 3 && !numericLike(value)) item.text += 1;
+        });
+      });
+      const code = [...stats].sort((a, b) => b.codes - a.codes)[0]?.col ?? -1;
+      const name = stats.filter((item) => item.col > code && item.text > 0).sort((a, b) => b.text - a.text)[0]?.col ?? code + 1;
+      const numericCols = stats.filter((item) => item.numbers > 0 && item.col !== code).sort((a, b) => a.col - b.col);
+      const closing = numericCols[numericCols.length - 1]?.col ?? -1;
+      return {
+        code,
+        name,
+        thirdId: stats.filter((item) => item.col !== code && item.col < name && item.codes > 0).sort((a, b) => b.codes - a.codes)[0]?.col ?? -1,
+        thirdName: stats.filter((item) => item.col > name && item.col < closing && item.text > 0).sort((a, b) => b.text - a.text)[0]?.col ?? -1,
+        opening: numericCols[0]?.col ?? -1,
+        debit: numericCols[1]?.col ?? -1,
+        credit: numericCols[2]?.col ?? -1,
+        closing
+      };
+    }
+
     async function parseExcel(file) {
       const data = await readFile(file);
       const workbook = XLSX.read(data, { type: "array", cellDates: true });
       const candidates = [];
       workbook.SheetNames.forEach((sheetName) => {
         const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
-        rows.slice(0, 35).forEach((row, index) => {
-          const headers = row.map(normalizeText);
-          const score = headers.filter((header) => [
-            "CODIGO CUENTA CONTABLE", "CODIGO CUENTA", "CUENTA CONTABLE", "CODIGO",
-            "NOMBRE CUENTA CONTABLE", "NOMBRE CUENTA", "CUENTA",
-            "SALDO FINAL", "MOVIMIENTO DEBITO", "MOVIMIENTO CREDITO", "SALDO INICIAL"
-          ].includes(header)).length;
+        rows.slice(0, 100).forEach((row, index) => {
+          const kinds = row.map(columnKind).filter(Boolean);
+          const score = new Set(kinds).size + (kinds.includes("code") ? 2 : 0) + (kinds.includes("closing") ? 2 : 0);
           candidates.push({ sheetName, rows, index, score });
         });
       });
       candidates.sort((a, b) => b.score - a.score);
-      if (!candidates.length || candidates[0].score < 2) throw new Error(`No encontre encabezados contables en ${file.name}.`);
+      if (!candidates.length) throw new Error(`No pude leer hojas en ${file.name}.`);
       const best = candidates[0];
       const headers = best.rows[best.index].map((value) => String(value || "").trim());
       const body = best.rows.slice(best.index + 1).filter((row) => row.some((value) => value !== ""));
-      const aliases = {
-        code: ["CODIGO CUENTA CONTABLE", "CODIGO CUENTA", "CUENTA CONTABLE", "CODIGO"],
-        name: ["NOMBRE CUENTA CONTABLE", "NOMBRE CUENTA", "CUENTA"],
-        thirdId: ["IDENTIFICACION", "NIT", "DOCUMENTO"],
-        thirdName: ["NOMBRE TERCERO", "TERCERO"],
-        opening: ["SALDO INICIAL"],
-        debit: ["MOVIMIENTO DEBITO", "MOVIMIENTO DEBITO", "DEBITO"],
-        credit: ["MOVIMIENTO CREDITO", "MOVIMIENTO CREDITO", "CREDITO"],
-        closing: ["SALDO FINAL"]
-      };
-      const normalizedHeaders = headers.map(normalizeText);
-      const indexFor = (keys) => {
-        for (const key of keys) {
-          const index = normalizedHeaders.indexOf(normalizeText(key));
-          if (index >= 0) return index;
-        }
-        return -1;
-      };
-      const indexes = Object.fromEntries(Object.entries(aliases).map(([key, keys]) => [key, indexFor(keys)]));
+      const indexes = { code: -1, name: -1, thirdId: -1, thirdName: -1, opening: -1, debit: -1, credit: -1, closing: -1 };
+      headers.forEach((header, index) => {
+        const kind = columnKind(header);
+        if (kind && indexes[kind] < 0) indexes[kind] = index;
+      });
+      if (best.score < 4 || indexes.code < 0 || indexes.name < 0 || indexes.closing < 0) {
+        const inferred = inferColumns(best.rows, best.index + 1);
+        Object.entries(inferred).forEach(([key, value]) => {
+          if (indexes[key] < 0 && value >= 0) indexes[key] = value;
+        });
+      }
       if (indexes.code < 0 || indexes.name < 0 || indexes.closing < 0) throw new Error(`${file.name} debe tener codigo, nombre de cuenta y saldo final.`);
       const accounts = body.map((row) => {
         const code = String(row[indexes.code] ?? "").replace(/\.0$/, "").trim();
@@ -402,6 +473,15 @@
         };
       }).filter((row) => row.code && row.name);
       return { file: file.name, accounts };
+    }
+
+    async function readExistingReport(file) {
+      if (!file) return { periods: [] };
+      const data = await readFile(file);
+      const workbook = XLSX.read(data, { type: "array", cellDates: true });
+      const sheetName = workbook.SheetNames.find((name) => normalizeText(name).includes("VALIDACION")) || workbook.SheetNames[0];
+      const rows = sheetName ? XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" }) : [];
+      return { periods: rows, file: file.name };
     }
 
     function detectPeriod(name) {
@@ -475,50 +555,187 @@
       return XLSX.utils.json_to_sheet(rows.length ? rows : [{ Estado: "Sin datos" }]);
     }
 
+    function metricRow(accounts, type, period, fileName) {
+      const metrics = summarize(accounts);
+      const currentAssets = Math.abs(accounts.filter((row) => ["11", "12", "13", "14"].some((prefix) => row.code.startsWith(prefix))).reduce((total, row) => total + row.closing, 0));
+      const currentLiabilities = Math.abs(accounts.filter((row) => ["21", "22", "23", "24", "25", "26", "27", "28"].some((prefix) => row.code.startsWith(prefix))).reduce((total, row) => total + row.closing, 0));
+      const grossProfit = metrics.income - metrics.costs;
+      const operatingProfit = grossProfit - Math.abs(accounts.filter((row) => row.code.startsWith("51") || row.code.startsWith("52")).reduce((total, row) => total + row.closing, 0));
+      return {
+        Tipo: type,
+        Periodo: period,
+        Archivo: fileName,
+        "Cuentas leidas": new Set(accounts.map((row) => row.code)).size,
+        "Filas BCE actualizadas": new Set(accounts.filter((row) => ["1", "2", "3"].includes(row.classCode)).map((row) => row.code.slice(0, 4))).size,
+        "Filas PYG actualizadas": new Set(accounts.filter((row) => ["4", "5", "6", "7"].includes(row.classCode)).map((row) => row.code.slice(0, 4))).size,
+        Ventas: metrics.income,
+        "Utilidad bruta": grossProfit,
+        "Utilidad operacional": operatingProfit,
+        Resultado: metrics.result,
+        Activos: metrics.assets,
+        Pasivos: metrics.liabilities,
+        Patrimonio: metrics.equity,
+        "Activos corrientes": currentAssets,
+        "Pasivos corrientes": currentLiabilities,
+        EBITDA: operatingProfit,
+        "Diferencia de cuadre": metrics.difference
+      };
+    }
+
+    function statementBySections(accounts, statement) {
+      const sections = statement === "balance"
+        ? [
+            ["ACTIVO CORRIENTE", ["11", "12", "13", "14"]],
+            ["ACTIVO NO CORRIENTE", ["15", "16", "17", "18", "19"]],
+            ["PASIVO CORRIENTE", ["21", "22", "23", "24", "25", "26", "27", "28"]],
+            ["PASIVO NO CORRIENTE", ["29"]],
+            ["PATRIMONIO NETO", ["3"]]
+          ]
+        : [
+            ["INGRESOS OPERACIONALES", ["41"]],
+            ["COSTOS DIRECTOS", ["61", "62", "7"]],
+            ["GASTOS DE ADMINISTRACION", ["51"]],
+            ["GASTOS DE VENTAS", ["52"]],
+            ["INGRESOS NO OPERACIONALES", ["42", "47"]],
+            ["GASTOS NO OPERACIONALES", ["53"]],
+            ["IMPUESTO DE RENTA", ["54"]]
+          ];
+      const rows = [];
+      sections.forEach(([section, prefixes]) => {
+        const grouped = new Map();
+        accounts.filter((row) => prefixes.some((prefix) => row.code.startsWith(prefix))).forEach((row) => {
+          const code = row.code.slice(0, 4);
+          const key = `${code}|${row.name}`;
+          if (!grouped.has(key)) grouped.set(key, { Rubro: section, Codigo: code, Cuenta: row.name, Valor: 0 });
+          const value = statement === "pyg" && row.classCode === "4" ? Math.abs(row.credit - row.debit || row.closing) : Math.abs(row.debit - row.credit || row.closing);
+          grouped.get(key).Valor += Math.abs(value || row.closing);
+        });
+        rows.push(...[...grouped.values()].sort((a, b) => a.Codigo.localeCompare(b.Codigo, "es", { numeric: true })));
+        rows.push({ Rubro: section, Codigo: "", Cuenta: `TOTAL ${section}`, Valor: [...grouped.values()].reduce((total, row) => total + row.Valor, 0) });
+      });
+      if (statement === "balance") {
+        const metrics = summarize(accounts);
+        rows.push({ Rubro: "TOTAL", Codigo: "", Cuenta: "TOTAL ACTIVO", Valor: metrics.assets });
+        rows.push({ Rubro: "TOTAL", Codigo: "", Cuenta: "TOTAL PASIVO Y PATRIMONIO", Valor: metrics.liabilities + metrics.equity });
+      } else {
+        rows.push({ Rubro: "TOTAL", Codigo: "", Cuenta: "UTILIDAD DESPUES DE IMPUESTOS", Valor: summarize(accounts).result });
+      }
+      return rows;
+    }
+
+    function managementFindings(monthlyRows) {
+      if (!monthlyRows.length) return [{ Hallazgo: "No hay periodos mensuales suficientes para generar hallazgos." }];
+      const current = monthlyRows[monthlyRows.length - 1];
+      const previous = monthlyRows.length > 1 ? monthlyRows[monthlyRows.length - 2] : null;
+      const findings = [];
+      if (previous && previous.Ventas) {
+        const variation = (current.Ventas - previous.Ventas) / Math.abs(previous.Ventas);
+        findings.push({ Hallazgo: `Las ventas ${variation >= 0 ? "aumentaron" : "disminuyeron"} ${(Math.abs(variation) * 100).toFixed(1)}% frente al periodo anterior.` });
+      }
+      const margin = current.Ventas ? current.Resultado / current.Ventas : 0;
+      const debt = current.Activos ? current.Pasivos / current.Activos : 0;
+      const currentRatio = current["Pasivos corrientes"] ? current["Activos corrientes"] / current["Pasivos corrientes"] : 0;
+      findings.push({ Hallazgo: `El margen neto estimado del ultimo periodo fue ${(margin * 100).toFixed(1)}%.` });
+      findings.push({ Hallazgo: `El nivel de endeudamiento estimado fue ${(debt * 100).toFixed(1)}% de los activos.` });
+      findings.push({ Hallazgo: `La razon corriente estimada fue ${currentRatio.toFixed(2)} veces.` });
+      findings.push({ Hallazgo: debt > 0.7 ? "Se recomienda revisar obligaciones y capacidad de pago de corto plazo." : margin < 0 ? "Se recomienda revisar costos y gastos que estan presionando el resultado." : currentRatio < 1 ? "Se recomienda priorizar caja y recuperacion de cartera." : "Se recomienda mantener seguimiento mensual a margen, liquidez y endeudamiento." });
+      return findings;
+    }
+
+    function thirdPartyBreakdown(accounts) {
+      const groupByThird = (filter, valueGetter) => {
+        const grouped = new Map();
+        accounts.filter(filter).forEach((row) => {
+          const key = `${row.thirdId}|${row.thirdName || "Sin tercero"}`;
+          if (!grouped.has(key)) grouped.set(key, { Identificacion: row.thirdId, Tercero: row.thirdName || "Sin tercero", Saldo: 0 });
+          grouped.get(key).Saldo += Math.abs(valueGetter(row));
+        });
+        return [...grouped.values()].filter((row) => row.Saldo > 0.5).sort((a, b) => b.Saldo - a.Saldo);
+      };
+      return {
+        receivables: groupByThird((row) => row.code.startsWith("13"), (row) => row.closing),
+        payables: groupByThird((row) => ["21", "22", "23", "24", "25", "26", "27", "28"].some((prefix) => row.code.startsWith(prefix)), (row) => row.closing),
+        activity: groupByThird((row) => row.thirdName || row.thirdId, (row) => Math.abs(row.debit) + Math.abs(row.credit)).map((row) => ({ ...row, Movimiento: row.Saldo }))
+      };
+    }
+
+    function expenseComposition(accounts) {
+      const labels = { "51": "Administracion", "52": "Ventas", "53": "No operacionales", "54": "Impuesto de renta", "61": "Costo de ventas", "62": "Costo de ventas", "71": "Costos de produccion", "72": "Costos de produccion", "73": "Costos de produccion" };
+      const grouped = new Map();
+      accounts.forEach((row) => {
+        const group = row.code.slice(0, 2);
+        if (!labels[group]) return;
+        if (!grouped.has(labels[group])) grouped.set(labels[group], { Concepto: labels[group], Valor: 0 });
+        grouped.get(labels[group]).Valor += Math.abs(row.debit - row.credit || row.closing);
+      });
+      return [...grouped.values()].sort((a, b) => b.Valor - a.Valor);
+    }
+
+    document.getElementById("monthlyMode").addEventListener("change", (event) => {
+      const firstTime = event.target.value === "Primera vez";
+      document.getElementById("startYearField").classList.toggle("hidden", !firstTime);
+      document.getElementById("openingBalanceField").classList.toggle("hidden", !firstTime);
+      document.getElementById("previousReportField").classList.toggle("hidden", firstTime);
+    });
+
     document.getElementById("processMonthly").addEventListener("click", async () => {
       const files = [...document.getElementById("monthlyFiles").files];
+      const mode = document.getElementById("monthlyMode").value;
+      const openingFile = document.getElementById("openingBalanceFile").files[0];
+      const previousFile = document.getElementById("previousReportFile").files[0];
       const message = document.getElementById("monthlyMessage");
       if (!files.length) { message.className = "notice warn"; message.textContent = "Selecciona al menos un balance."; return; }
+      if (mode === "Primera vez" && !openingFile) { message.className = "notice warn"; message.textContent = "En primera vez debes cargar el archivo de saldo inicial."; return; }
+      if (mode === "Actualizar base existente" && !previousFile) { message.className = "notice warn"; message.textContent = "Carga el comparativo mensual anterior para actualizar la base."; return; }
       try {
         message.className = "notice info"; message.textContent = "Procesando archivos...";
+        const existingReport = mode === "Actualizar base existente" ? await readExistingReport(previousFile) : { periods: [] };
+        const openingParsed = openingFile ? await parseExcel(openingFile) : null;
         const parsed = await Promise.all(files.map(parseExcel));
         const accounts = parsed.flatMap((item) => item.accounts);
+        const allAccounts = openingParsed ? [...openingParsed.accounts, ...accounts] : accounts;
         const metrics = summarize(accounts);
         renderMetrics(document.getElementById("monthlyMetrics"), metrics);
-        const periodRows = parsed.map((item) => {
-          const itemMetrics = summarize(item.accounts);
-          return {
-            Periodo: item.accounts[0]?.period || item.file,
-            Archivo: item.file,
-            Cuentas: new Set(item.accounts.map((row) => row.code)).size,
-            Activo: itemMetrics.assets,
-            Pasivo: itemMetrics.liabilities,
-            Patrimonio: itemMetrics.equity,
-            Ingresos: itemMetrics.income,
-            Costos: itemMetrics.costs,
-            Gastos: itemMetrics.expenses,
-            Resultado: itemMetrics.result,
-            Diferencia: itemMetrics.difference
-          };
-        });
-        const statementRows = [
-          ...byAccount(accounts, "Activo", ["1"]),
-          ...byAccount(accounts, "Pasivo", ["2"]),
-          ...byAccount(accounts, "Patrimonio", ["3"]),
-          ...byAccount(accounts, "Ingresos", ["4"]),
-          ...byAccount(accounts, "Gastos", ["5"]),
-          ...byAccount(accounts, "Costos", ["6", "7"])
+        const periodRows = [...existingReport.periods];
+        if (openingParsed) periodRows.push(metricRow(openingParsed.accounts, "Saldo inicial", `Saldo final ${document.getElementById("monthlyStartYear").value}`, openingParsed.file));
+        periodRows.push(...parsed.map((item) => metricRow(item.accounts, "Mensual", item.accounts[0]?.period || item.file, item.file)));
+        const monthlyRows = periodRows.filter((row) => row.Tipo === "Mensual");
+        const balanceRows = statementBySections(accounts, "balance");
+        const pygRows = statementBySections(accounts, "pyg");
+        const thirdParties = thirdPartyBreakdown(accounts);
+        const expenses = expenseComposition(accounts);
+        const additions = [...new Map(allAccounts.map((row) => [row.code.slice(0, 4), { Cuenta: row.code.slice(0, 4), Nombre: row.name, Estado: ["1", "2", "3"].includes(row.classCode) ? "BCE" : ["4", "5", "6", "7"].includes(row.classCode) ? "P Y G" : "Fuera de estados", Motivo: "Cuenta detectada en balance cargado" }])).values()].sort((a, b) => a.Cuenta.localeCompare(b.Cuenta, "es", { numeric: true }));
+        const previewRows = [
+          ...(openingParsed ? [{ Tipo: "Saldo inicial", Archivo: openingParsed.file, "Periodo detectado": openingParsed.accounts[0]?.period || "No detectado", Cuentas: new Set(openingParsed.accounts.map((row) => row.code)).size }] : []),
+          ...parsed.map((item) => ({ Tipo: "Balance mensual", Archivo: item.file, "Periodo detectado": item.accounts[0]?.period || "No detectado", Cuentas: new Set(item.accounts.map((row) => row.code)).size }))
         ];
-        const thirdRows = topThirdParties(accounts);
+        const dashboardRows = monthlyRows.map((row) => ({
+          Periodo: row.Periodo,
+          Ventas: row.Ventas,
+          "Utilidad bruta": row["Utilidad bruta"],
+          "Utilidad operacional": row["Utilidad operacional"],
+          Resultado: row.Resultado,
+          Activos: row.Activos,
+          Pasivos: row.Pasivos,
+          "Diferencia de cuadre": row["Diferencia de cuadre"]
+        }));
         renderTabs(document.getElementById("monthlyOutput"), [
-          { label: "Periodos", html: renderTable(periodRows, ["Periodo", "Archivo", "Cuentas", "Activo", "Pasivo", "Patrimonio", "Ingresos", "Costos", "Gastos", "Resultado", "Diferencia"]) },
-          { label: "Detalle contable", html: renderTable(statementRows, ["Rubro", "Codigo", "Cuenta", "Valor"]) },
-          { label: "Terceros", html: renderTable(thirdRows, ["Tercero", "Identificacion", "Valor"]) }
+          { label: "Vista previa", html: renderTable(previewRows, ["Tipo", "Archivo", "Periodo detectado", "Cuentas"]) },
+          { label: "Estados Financieros", html: `<h2>Balance General</h2>${renderTable(balanceRows, ["Rubro", "Codigo", "Cuenta", "Valor"])}<h2>Estado de Resultados</h2>${renderTable(pygRows, ["Rubro", "Codigo", "Cuenta", "Valor"])}` },
+          { label: "Dashboard Gerencial", html: `<h2>Indicadores mensuales</h2>${renderTable(dashboardRows, ["Periodo", "Ventas", "Utilidad bruta", "Utilidad operacional", "Resultado", "Activos", "Pasivos", "Diferencia de cuadre"])}<h2>Composicion de costos y gastos</h2>${renderTable(expenses, ["Concepto", "Valor"])}<h2>Lectura ejecutiva</h2>${renderTable(managementFindings(monthlyRows), ["Hallazgo"])}` },
+          { label: "Revision por tercero", html: `<h2>Principales saldos por cobrar</h2>${renderTable(thirdParties.receivables.slice(0, 20), ["Identificacion", "Tercero", "Saldo"])}<h2>Principales obligaciones</h2>${renderTable(thirdParties.payables.slice(0, 20), ["Identificacion", "Tercero", "Saldo"])}<h2>Terceros con mayor movimiento</h2>${renderTable(thirdParties.activity.slice(0, 30), ["Identificacion", "Tercero", "Movimiento"])}` },
+          { label: "Control tecnico", html: `<h2>Periodos procesados</h2>${renderTable(periodRows, ["Tipo", "Periodo", "Archivo", "Cuentas leidas", "Filas BCE actualizadas", "Filas PYG actualizadas"])}<h2>Cuentas detectadas</h2>${renderTable(additions, ["Cuenta", "Nombre", "Estado", "Motivo"])}` }
         ]);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, worksheetFromRows(periodRows), "Periodos");
-        XLSX.utils.book_append_sheet(wb, worksheetFromRows(statementRows), "Detalle");
-        XLSX.utils.book_append_sheet(wb, worksheetFromRows(thirdRows), "Terceros");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(periodRows), "Validacion");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(balanceRows), "BCE");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(pygRows), "P Y G");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(dashboardRows), "Indicadores");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(expenses), "Costos y gastos");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(thirdParties.receivables), "Cartera terceros");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(thirdParties.payables), "Obligaciones terceros");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(thirdParties.activity), "Actividad terceros");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(additions), "Cuentas detectadas");
         state.monthlyWorkbook = wb;
         document.getElementById("downloadMonthly").disabled = false;
         message.className = "notice ok"; message.textContent = `Comparativo listo con ${files.length} archivo(s).`;
