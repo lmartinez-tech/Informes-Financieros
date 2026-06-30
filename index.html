@@ -427,42 +427,69 @@
       };
     }
 
+    function cleanCode(value) {
+      return String(value ?? "").replace(/\.0$/, "").replace(/\D/g, "").trim();
+    }
+
+    function validAccountRows(rows, indexes, startIndex) {
+      if (indexes.code < 0 || indexes.closing < 0) return 0;
+      return rows.slice(startIndex, Math.min(rows.length, startIndex + 500)).filter((row) => {
+        const code = cleanCode(row[indexes.code]);
+        if (code.length < 4 || code.length > 12) return false;
+        if (!/^[1-9]/.test(code)) return false;
+        const closing = cleanMoney(row[indexes.closing]);
+        const hasClosingText = String(row[indexes.closing] ?? "").trim() !== "";
+        return hasClosingText || Math.abs(closing) > 0;
+      }).length;
+    }
+
+    function detectExcelLayout(workbook) {
+      const layouts = [];
+      workbook.SheetNames.forEach((sheetName) => {
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+        rows.slice(0, 120).forEach((row, index) => {
+          const indexes = { code: -1, name: -1, thirdId: -1, thirdName: -1, opening: -1, debit: -1, credit: -1, closing: -1 };
+          row.forEach((header, col) => {
+            const kind = columnKind(header);
+            if (kind && indexes[kind] < 0) indexes[kind] = col;
+          });
+          const inferred = inferColumns(rows, index + 1);
+          const merged = { ...indexes };
+          Object.entries(inferred).forEach(([key, value]) => {
+            if (merged[key] < 0 && value >= 0) merged[key] = value;
+          });
+          const headerKinds = new Set(row.map(columnKind).filter(Boolean)).size;
+          const validRows = validAccountRows(rows, merged, index + 1);
+          layouts.push({
+            sheetName,
+            rows,
+            startIndex: index + 1,
+            indexes: merged,
+            score: validRows * 10 + headerKinds
+          });
+        });
+      });
+      layouts.sort((a, b) => b.score - a.score);
+      return layouts[0];
+    }
+
     async function parseExcel(file) {
       const data = await readFile(file);
       const workbook = XLSX.read(data, { type: "array", cellDates: true });
-      const candidates = [];
-      workbook.SheetNames.forEach((sheetName) => {
-        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
-        rows.slice(0, 100).forEach((row, index) => {
-          const kinds = row.map(columnKind).filter(Boolean);
-          const score = new Set(kinds).size + (kinds.includes("code") ? 2 : 0) + (kinds.includes("closing") ? 2 : 0);
-          candidates.push({ sheetName, rows, index, score });
-        });
-      });
-      candidates.sort((a, b) => b.score - a.score);
-      if (!candidates.length) throw new Error(`No pude leer hojas en ${file.name}.`);
-      const best = candidates[0];
-      const headers = best.rows[best.index].map((value) => String(value || "").trim());
-      const body = best.rows.slice(best.index + 1).filter((row) => row.some((value) => value !== ""));
-      const indexes = { code: -1, name: -1, thirdId: -1, thirdName: -1, opening: -1, debit: -1, credit: -1, closing: -1 };
-      headers.forEach((header, index) => {
-        const kind = columnKind(header);
-        if (kind && indexes[kind] < 0) indexes[kind] = index;
-      });
-      if (best.score < 4 || indexes.code < 0 || indexes.name < 0 || indexes.closing < 0) {
-        const inferred = inferColumns(best.rows, best.index + 1);
-        Object.entries(inferred).forEach(([key, value]) => {
-          if (indexes[key] < 0 && value >= 0) indexes[key] = value;
-        });
+      const layout = detectExcelLayout(workbook);
+      if (!layout || layout.indexes.code < 0 || layout.indexes.closing < 0 || layout.score < 10) {
+        throw new Error(`${file.name}: no pude ubicar automaticamente codigo de cuenta y saldo final. Revisa que la hoja no este vacia o protegida.`);
       }
-      if (indexes.code < 0 || indexes.name < 0 || indexes.closing < 0) throw new Error(`${file.name} debe tener codigo, nombre de cuenta y saldo final.`);
+      const { rows, indexes, startIndex } = layout;
+      const body = rows.slice(startIndex).filter((row) => row.some((value) => value !== ""));
       const accounts = body.map((row) => {
-        const code = String(row[indexes.code] ?? "").replace(/\.0$/, "").trim();
+        const code = cleanCode(row[indexes.code]);
+        const name = indexes.name >= 0 ? String(row[indexes.name] ?? "").trim() : "";
         return {
           source: file.name,
           period: detectPeriod(file.name),
           code,
-          name: String(row[indexes.name] ?? "").trim(),
+          name: name || `Cuenta ${code}`,
           classCode: code.charAt(0),
           thirdId: indexes.thirdId >= 0 ? String(row[indexes.thirdId] ?? "").trim() : "",
           thirdName: indexes.thirdName >= 0 ? String(row[indexes.thirdName] ?? "").trim() : "",
@@ -471,7 +498,8 @@
           credit: indexes.credit >= 0 ? cleanMoney(row[indexes.credit]) : 0,
           closing: cleanMoney(row[indexes.closing])
         };
-      }).filter((row) => row.code && row.name);
+      }).filter((row) => row.code && row.name && row.code.length >= 4 && /^[1-9]/.test(row.code));
+      if (!accounts.length) throw new Error(`${file.name}: encontre columnas, pero no filas contables validas.`);
       return { file: file.name, accounts };
     }
 
