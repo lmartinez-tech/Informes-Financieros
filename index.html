@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Informes Financieros</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d9dee8;
+      --canvas: #f4f6f8;
+      --surface: #ffffff;
+      --brand: #0b6b57;
+      --brand-dark: #084d40;
+      --accent: #b7791f;
+      --danger: #b42318;
+      --ok: #087443;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+    .shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 100vh; }
+    aside {
+      background: #101828;
+      color: #f2f4f7;
+      padding: 24px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+    .brand { display: flex; gap: 12px; align-items: center; margin-bottom: 28px; }
+    .mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: #d6a44b;
+      color: #101828;
+      font-weight: 800;
+    }
+    .brand strong { display: block; color: #fff; }
+    .brand span { color: #98a2b3; font-size: 12px; }
+    .nav-label { font-size: 12px; color: #98a2b3; letter-spacing: .06em; margin: 24px 8px 10px; }
+    .nav button {
+      width: 100%;
+      border: 0;
+      border-radius: 7px;
+      padding: 12px;
+      margin: 3px 0;
+      background: transparent;
+      color: #f2f4f7;
+      text-align: left;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .nav button:hover, .nav button.active { background: #1d2939; }
+    main { padding: 28px clamp(18px, 3vw, 42px) 48px; }
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 14px;
+      margin-bottom: 24px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .status { text-transform: none; color: #344054; }
+    .status::before {
+      content: "";
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #12b76a;
+      margin-right: 8px;
+    }
+    .page-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+    .eyebrow { color: var(--brand); font-size: 12px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; }
+    h1 { font-size: clamp(30px, 4vw, 46px); line-height: 1.05; margin: 0; letter-spacing: 0; }
+    h2 { font-size: 22px; margin: 28px 0 14px; }
+    h3 { font-size: 16px; margin: 0 0 10px; }
+    .subtitle { color: var(--muted); max-width: 900px; line-height: 1.55; margin-top: 10px; }
+    .badge {
+      border: 1px solid #b7d8cf;
+      background: #eaf4f1;
+      color: var(--brand-dark);
+      border-radius: 7px;
+      padding: 10px 13px;
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card, .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .card .num { color: var(--accent); font-size: 12px; font-weight: 900; margin-bottom: 18px; }
+    .card p, .panel p { color: var(--muted); line-height: 1.5; margin: 0; }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      margin: 4px 0 22px;
+    }
+    .step { padding: 13px 8px; color: var(--muted); font-size: 13px; }
+    .step strong { color: var(--brand); margin-right: 6px; }
+    .workgrid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 18px; align-items: start; }
+    label { display: block; font-weight: 750; margin-bottom: 7px; }
+    input, select {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      padding: 11px 12px;
+      background: #fff;
+      color: var(--ink);
+    }
+    input[type="file"] { padding: 10px; }
+    .field { margin-bottom: 16px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    button.primary, button.secondary {
+      border-radius: 7px;
+      min-height: 42px;
+      padding: 0 16px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    button.primary { background: var(--brand); border: 1px solid var(--brand); color: #fff; }
+    button.primary:hover { background: var(--brand-dark); }
+    button.secondary { background: #fff; border: 1px solid #cbd5e1; color: var(--ink); }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .metric { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .metric strong { display: block; font-size: 20px; margin-top: 7px; }
+    .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-top: 14px; overflow-x: auto; }
+    .tabs button {
+      border: 0;
+      background: transparent;
+      padding: 12px 10px;
+      color: var(--muted);
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .tabs button.active { color: var(--brand); border-bottom: 3px solid var(--brand); }
+    .tab-panel { display: none; padding-top: 16px; }
+    .tab-panel.active { display: block; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    th, td { border-bottom: 1px solid #eef1f5; padding: 10px; text-align: left; font-size: 13px; vertical-align: top; }
+    th { background: #f8fafc; color: #344054; font-size: 12px; text-transform: uppercase; }
+    td.number { text-align: right; font-variant-numeric: tabular-nums; }
+    .notice { padding: 13px 14px; border-radius: 8px; margin: 12px 0; line-height: 1.45; }
+    .notice.info { background: #eff8ff; color: #175cd3; border: 1px solid #b2ddff; }
+    .notice.ok { background: #ecfdf3; color: var(--ok); border: 1px solid #abefc6; }
+    .notice.warn { background: #fffaeb; color: #93370d; border: 1px solid #fedf89; }
+    .notice.error { background: #fef3f2; color: var(--danger); border: 1px solid #fecdca; }
+    .hidden { display: none !important; }
+    .section { display: none; }
+    .section.active { display: block; }
+    .small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; }
+      .page-header, .workgrid { grid-template-columns: 1fr; }
+      .grid, .steps, .metrics { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand">
+        <div class="mark">JS</div>
+        <div><strong>Julio Salazar</strong><span>Informes financieros</span></div>
+      </div>
+      <div class="nav-label">NAVEGACION</div>
+      <div class="nav">
+        <button class="active" data-section="home">Inicio</button>
+        <button data-section="monthly">Comparativo mensual</button>
+        <button data-section="niif">Estados financieros NIIF</button>
+      </div>
+    </aside>
+    <main>
+      <div class="topline"><span id="topLabel">Inicio</span><span class="status">App publicada en GitHub Pages</span></div>
+
+      <section id="home" class="section active">
+        <header class="page-header">
+          <div>
+            <div class="eyebrow">Panel ejecutivo</div>
+            <h1>Informes financieros</h1>
+            <div class="subtitle">Carga archivos Excel directamente en el navegador para construir comparativos mensuales y borradores de estados financieros bajo NIIF. Nada se sube a un servidor: el procesamiento ocurre en tu equipo.</div>
+          </div>
+          <div class="badge">Version web estatica</div>
+        </header>
+        <div class="grid">
+          <article class="card"><div class="num">01</div><h3>Comparativo mensual</h3><p>Procesa uno o varios balances, compara periodos y resume activos, pasivos, patrimonio, ingresos, costos, gastos y resultado.</p></article>
+          <article class="card"><div class="num">02</div><h3>Estados financieros NIIF</h3><p>Genera una estructura revisable con situacion financiera, resultado integral, flujo preliminar, cambios en patrimonio, notas y control.</p></article>
+          <article class="card"><div class="num">03</div><h3>Carga real de archivos</h3><p>Usa controles nativos de archivo en la pagina publicada. El Excel se lee localmente con el navegador.</p></article>
+          <article class="card"><div class="num">04</div><h3>Validacion contable</h3><p>Calcula diferencia de cuadre y senales de revision para evitar entregar un informe con saldos inconsistentes.</p></article>
+          <article class="card"><div class="num">05</div><h3>Descargas</h3><p>Exporta el resultado a Excel para revisarlo, ajustarlo y compartirlo con el cliente.</p></article>
+          <article class="card"><div class="num">06</div><h3>Base escalable</h3><p>Queda preparada para incorporar plantillas, reglas por cliente y mas reportes financieros.</p></article>
+        </div>
+      </section>
+
+      <section id="monthly" class="section">
+        <header class="page-header">
+          <div>
+            <div class="eyebrow">Analisis comparativo</div>
+            <h1>Comparativo mensual</h1>
+            <div class="subtitle">Carga uno o varios balances de prueba. El sistema detecta columnas, clasifica cuentas y genera indicadores por periodo.</div>
+          </div>
+          <div class="badge">Balance + PYG</div>
+        </header>
+        <div class="steps"><div class="step"><strong>01</strong>Sube los balances</div><div class="step"><strong>02</strong>Revisa indicadores</div><div class="step"><strong>03</strong>Descarga Excel</div></div>
+        <div class="workgrid">
+          <div class="panel">
+            <div class="field">
+              <label for="monthlyFiles">Balances mensuales en Excel</label>
+              <input id="monthlyFiles" type="file" accept=".xlsx,.xls" multiple>
+              <p class="small">Puedes seleccionar varios archivos. Si el periodo no viene en el archivo, se toma del nombre.</p>
+            </div>
+            <div class="actions">
+              <button class="primary" id="processMonthly">Procesar comparativo</button>
+              <button class="secondary" id="downloadMonthly" disabled>Descargar Excel</button>
+            </div>
+            <div id="monthlyMessage" class="notice info">Carga balances para iniciar.</div>
+          </div>
+          <div>
+            <div id="monthlyMetrics" class="metrics"></div>
+            <div id="monthlyOutput"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="niif" class="section">
+        <header class="page-header">
+          <div>
+            <div class="eyebrow">Cumplimiento financiero</div>
+            <h1>Estados financieros bajo NIIF</h1>
+            <div class="subtitle">Prepara un borrador estructurado desde un balance de prueba. La salida requiere revision profesional antes de emision formal.</div>
+          </div>
+          <div class="badge">NIIF Colombia</div>
+        </header>
+        <div class="steps"><div class="step"><strong>01</strong>Carga el balance</div><div class="step"><strong>02</strong>Valida cuadre</div><div class="step"><strong>03</strong>Exporta borrador</div></div>
+        <div class="workgrid">
+          <div class="panel">
+            <div class="field"><label for="companyName">Nombre de la entidad</label><input id="companyName" value="Entidad reportante"></div>
+            <div class="field"><label for="standardGroup">Marco NIIF aplicable</label><select id="standardGroup"><option>Grupo 2 - NIIF para Pymes</option><option>Grupo 1 - NIIF plenas</option><option>Grupo 3 - Microempresas</option></select></div>
+            <div class="field"><label for="niifFile">Balance de prueba en Excel</label><input id="niifFile" type="file" accept=".xlsx,.xls"></div>
+            <div class="actions">
+              <button class="primary" id="processNiif">Preparar estados NIIF</button>
+              <button class="secondary" id="downloadNiif" disabled>Descargar Excel</button>
+              <button class="secondary" id="printNiif" disabled>Imprimir / PDF</button>
+            </div>
+            <div id="niifMessage" class="notice info">Carga un balance para iniciar.</div>
+          </div>
+          <div>
+            <div id="niifMetrics" class="metrics"></div>
+            <div id="niifOutput"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const MONEY_COLUMNS = new Set(["Valor", "Saldo inicial", "Debito", "Credito", "Saldo final", "Activo", "Pasivo", "Patrimonio", "Ingresos", "Costos", "Gastos", "Resultado", "Diferencia"]);
+    const state = { monthlyWorkbook: null, niifWorkbook: null, niifPrintHtml: "" };
+
+    document.querySelectorAll(".nav button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".nav button").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll(".section").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        document.getElementById(button.dataset.section).classList.add("active");
+        document.getElementById("topLabel").textContent = button.textContent;
+      });
+    });
+
+    function normalizeText(value) {
+      return String(value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^A-Za-z0-9]+/g, " ")
+        .trim()
+        .toUpperCase();
+    }
+
+    function cleanMoney(value) {
+      if (value === null || value === undefined || value === "") return 0;
+      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+      let text = String(value).trim();
+      if (!text || ["NAN", "NONE", "NULL", "-"].includes(normalizeText(text))) return 0;
+      const negative = text.startsWith("-") || /^\(.*\)$/.test(text);
+      text = text.replace(/[^0-9,.\-]/g, "").replace(/-/g, "");
+      if (text.includes(",") && text.includes(".")) {
+        text = text.lastIndexOf(",") > text.lastIndexOf(".") ? text.replace(/\./g, "").replace(",", ".") : text.replace(/,/g, "");
+      } else if (text.includes(",")) {
+        const parts = text.split(",");
+        text = parts[parts.length - 1].length === 3 ? parts.join("") : text.replace(",", ".");
+      } else if (text.includes(".")) {
+        const parts = text.split(".");
+        if (parts.length > 1 && parts.slice(1).every((part) => part.length === 3)) text = parts.join("");
+      }
+      const number = Number.parseFloat(text);
+      return Number.isFinite(number) ? (negative ? -number : number) : 0;
+    }
+
+    function money(value) {
+      const amount = Number(value || 0);
+      const formatted = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(Math.abs(amount));
+      return `${amount < 0 ? "-" : ""}$${formatted}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
+    }
+
+    function readFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(new Uint8Array(event.target.result));
+        reader.onerror = () => reject(new Error(`No se pudo leer ${file.name}.`));
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    async function parseExcel(file) {
+      const data = await readFile(file);
+      const workbook = XLSX.read(data, { type: "array", cellDates: true });
+      const candidates = [];
+      workbook.SheetNames.forEach((sheetName) => {
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+        rows.slice(0, 35).forEach((row, index) => {
+          const headers = row.map(normalizeText);
+          const score = headers.filter((header) => [
+            "CODIGO CUENTA CONTABLE", "CODIGO CUENTA", "CUENTA CONTABLE", "CODIGO",
+            "NOMBRE CUENTA CONTABLE", "NOMBRE CUENTA", "CUENTA",
+            "SALDO FINAL", "MOVIMIENTO DEBITO", "MOVIMIENTO CREDITO", "SALDO INICIAL"
+          ].includes(header)).length;
+          candidates.push({ sheetName, rows, index, score });
+        });
+      });
+      candidates.sort((a, b) => b.score - a.score);
+      if (!candidates.length || candidates[0].score < 2) throw new Error(`No encontre encabezados contables en ${file.name}.`);
+      const best = candidates[0];
+      const headers = best.rows[best.index].map((value) => String(value || "").trim());
+      const body = best.rows.slice(best.index + 1).filter((row) => row.some((value) => value !== ""));
+      const aliases = {
+        code: ["CODIGO CUENTA CONTABLE", "CODIGO CUENTA", "CUENTA CONTABLE", "CODIGO"],
+        name: ["NOMBRE CUENTA CONTABLE", "NOMBRE CUENTA", "CUENTA"],
+        thirdId: ["IDENTIFICACION", "NIT", "DOCUMENTO"],
+        thirdName: ["NOMBRE TERCERO", "TERCERO"],
+        opening: ["SALDO INICIAL"],
+        debit: ["MOVIMIENTO DEBITO", "MOVIMIENTO DEBITO", "DEBITO"],
+        credit: ["MOVIMIENTO CREDITO", "MOVIMIENTO CREDITO", "CREDITO"],
+        closing: ["SALDO FINAL"]
+      };
+      const normalizedHeaders = headers.map(normalizeText);
+      const indexFor = (keys) => {
+        for (const key of keys) {
+          const index = normalizedHeaders.indexOf(normalizeText(key));
+          if (index >= 0) return index;
+        }
+        return -1;
+      };
+      const indexes = Object.fromEntries(Object.entries(aliases).map(([key, keys]) => [key, indexFor(keys)]));
+      if (indexes.code < 0 || indexes.name < 0 || indexes.closing < 0) throw new Error(`${file.name} debe tener codigo, nombre de cuenta y saldo final.`);
+      const accounts = body.map((row) => {
+        const code = String(row[indexes.code] ?? "").replace(/\.0$/, "").trim();
+        return {
+          source: file.name,
+          period: detectPeriod(file.name),
+          code,
+          name: String(row[indexes.name] ?? "").trim(),
+          classCode: code.charAt(0),
+          thirdId: indexes.thirdId >= 0 ? String(row[indexes.thirdId] ?? "").trim() : "",
+          thirdName: indexes.thirdName >= 0 ? String(row[indexes.thirdName] ?? "").trim() : "",
+          opening: indexes.opening >= 0 ? cleanMoney(row[indexes.opening]) : 0,
+          debit: indexes.debit >= 0 ? cleanMoney(row[indexes.debit]) : 0,
+          credit: indexes.credit >= 0 ? cleanMoney(row[indexes.credit]) : 0,
+          closing: cleanMoney(row[indexes.closing])
+        };
+      }).filter((row) => row.code && row.name);
+      return { file: file.name, accounts };
+    }
+
+    function detectPeriod(name) {
+      const months = [["ENERO", "01"], ["FEBRERO", "02"], ["MARZO", "03"], ["ABRIL", "04"], ["MAYO", "05"], ["JUNIO", "06"], ["JULIO", "07"], ["AGOSTO", "08"], ["SEPTIEMBRE", "09"], ["SETIEMBRE", "09"], ["OCTUBRE", "10"], ["NOVIEMBRE", "11"], ["DICIEMBRE", "12"]];
+      const normalized = normalizeText(name);
+      const year = (normalized.match(/20\d{2}/) || [""])[0];
+      const found = months.find(([month]) => normalized.includes(month));
+      return found ? `${found[1]}/${year || "2026"}` : (year || name.replace(/\.[^.]+$/, ""));
+    }
+
+    function summarize(accounts) {
+      const sumClass = (classes) => accounts.filter((row) => classes.includes(row.classCode)).reduce((total, row) => total + row.closing, 0);
+      const assets = Math.abs(sumClass(["1"]));
+      const liabilities = Math.abs(sumClass(["2"]));
+      const equity = Math.abs(sumClass(["3"]));
+      const income = Math.abs(sumClass(["4"]));
+      const expenses = Math.abs(sumClass(["5"]));
+      const costs = Math.abs(sumClass(["6", "7"]));
+      const result = income - costs - expenses;
+      return { assets, liabilities, equity, income, costs, expenses, result, difference: assets - (liabilities + equity + result) };
+    }
+
+    function byAccount(accounts, title, classes) {
+      const grouped = new Map();
+      accounts.filter((row) => classes.includes(row.classCode)).forEach((row) => {
+        const key = `${row.code}|${row.name}`;
+        if (!grouped.has(key)) grouped.set(key, { Rubro: title, Codigo: row.code, Cuenta: row.name, Valor: 0 });
+        grouped.get(key).Valor += row.closing;
+      });
+      return [...grouped.values()].sort((a, b) => String(a.Codigo).localeCompare(String(b.Codigo), "es", { numeric: true })).map((row) => ({ ...row, Valor: Math.abs(row.Valor) }));
+    }
+
+    function renderMetrics(target, metrics) {
+      target.innerHTML = [
+        ["Activo", metrics.assets],
+        ["Pasivo", metrics.liabilities],
+        ["Patrimonio", metrics.equity],
+        ["Resultado", metrics.result],
+        ["Ingresos", metrics.income],
+        ["Costos", metrics.costs],
+        ["Gastos", metrics.expenses],
+        ["Diferencia", metrics.difference]
+      ].map(([label, value]) => `<div class="metric"><span>${label}</span><strong>${money(value)}</strong></div>`).join("");
+    }
+
+    function renderTable(rows, columns) {
+      if (!rows.length) return '<div class="notice info">No hay datos para mostrar.</div>';
+      const header = `<tr>${columns.map((col) => `<th>${escapeHtml(col)}</th>`).join("")}</tr>`;
+      const body = rows.map((row) => `<tr>${columns.map((col) => {
+        const value = row[col] ?? "";
+        const isNumber = typeof value === "number" || MONEY_COLUMNS.has(col);
+        return `<td class="${isNumber ? "number" : ""}">${isNumber ? money(value) : escapeHtml(value)}</td>`;
+      }).join("")}</tr>`).join("");
+      return `<table>${header}${body}</table>`;
+    }
+
+    function renderTabs(target, tabs) {
+      const id = `tabs-${Math.random().toString(36).slice(2)}`;
+      target.innerHTML = `<div class="tabs" id="${id}-nav">${tabs.map((tab, index) => `<button class="${index === 0 ? "active" : ""}" data-tab="${index}">${escapeHtml(tab.label)}</button>`).join("")}</div>${tabs.map((tab, index) => `<div class="tab-panel ${index === 0 ? "active" : ""}" data-panel="${index}">${tab.html}</div>`).join("")}`;
+      target.querySelectorAll(`#${id}-nav button`).forEach((button) => {
+        button.addEventListener("click", () => {
+          target.querySelectorAll(".tabs button").forEach((item) => item.classList.remove("active"));
+          target.querySelectorAll(".tab-panel").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          target.querySelector(`[data-panel="${button.dataset.tab}"]`).classList.add("active");
+        });
+      });
+    }
+
+    function worksheetFromRows(rows) {
+      return XLSX.utils.json_to_sheet(rows.length ? rows : [{ Estado: "Sin datos" }]);
+    }
+
+    document.getElementById("processMonthly").addEventListener("click", async () => {
+      const files = [...document.getElementById("monthlyFiles").files];
+      const message = document.getElementById("monthlyMessage");
+      if (!files.length) { message.className = "notice warn"; message.textContent = "Selecciona al menos un balance."; return; }
+      try {
+        message.className = "notice info"; message.textContent = "Procesando archivos...";
+        const parsed = await Promise.all(files.map(parseExcel));
+        const accounts = parsed.flatMap((item) => item.accounts);
+        const metrics = summarize(accounts);
+        renderMetrics(document.getElementById("monthlyMetrics"), metrics);
+        const periodRows = parsed.map((item) => {
+          const itemMetrics = summarize(item.accounts);
+          return {
+            Periodo: item.accounts[0]?.period || item.file,
+            Archivo: item.file,
+            Cuentas: new Set(item.accounts.map((row) => row.code)).size,
+            Activo: itemMetrics.assets,
+            Pasivo: itemMetrics.liabilities,
+            Patrimonio: itemMetrics.equity,
+            Ingresos: itemMetrics.income,
+            Costos: itemMetrics.costs,
+            Gastos: itemMetrics.expenses,
+            Resultado: itemMetrics.result,
+            Diferencia: itemMetrics.difference
+          };
+        });
+        const statementRows = [
+          ...byAccount(accounts, "Activo", ["1"]),
+          ...byAccount(accounts, "Pasivo", ["2"]),
+          ...byAccount(accounts, "Patrimonio", ["3"]),
+          ...byAccount(accounts, "Ingresos", ["4"]),
+          ...byAccount(accounts, "Gastos", ["5"]),
+          ...byAccount(accounts, "Costos", ["6", "7"])
+        ];
+        const thirdRows = topThirdParties(accounts);
+        renderTabs(document.getElementById("monthlyOutput"), [
+          { label: "Periodos", html: renderTable(periodRows, ["Periodo", "Archivo", "Cuentas", "Activo", "Pasivo", "Patrimonio", "Ingresos", "Costos", "Gastos", "Resultado", "Diferencia"]) },
+          { label: "Detalle contable", html: renderTable(statementRows, ["Rubro", "Codigo", "Cuenta", "Valor"]) },
+          { label: "Terceros", html: renderTable(thirdRows, ["Tercero", "Identificacion", "Valor"]) }
+        ]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(periodRows), "Periodos");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(statementRows), "Detalle");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(thirdRows), "Terceros");
+        state.monthlyWorkbook = wb;
+        document.getElementById("downloadMonthly").disabled = false;
+        message.className = "notice ok"; message.textContent = `Comparativo listo con ${files.length} archivo(s).`;
+      } catch (error) {
+        message.className = "notice error"; message.textContent = error.message;
+      }
+    });
+
+    function topThirdParties(accounts) {
+      const grouped = new Map();
+      accounts.filter((row) => row.thirdName || row.thirdId).forEach((row) => {
+        const key = `${row.thirdId}|${row.thirdName}`;
+        if (!grouped.has(key)) grouped.set(key, { Tercero: row.thirdName || "Sin nombre", Identificacion: row.thirdId, Valor: 0 });
+        grouped.get(key).Valor += Math.abs(row.closing);
+      });
+      return [...grouped.values()].sort((a, b) => b.Valor - a.Valor).slice(0, 30);
+    }
+
+    document.getElementById("downloadMonthly").addEventListener("click", () => {
+      if (state.monthlyWorkbook) XLSX.writeFile(state.monthlyWorkbook, "Comparativo_mensual.xlsx");
+    });
+
+    document.getElementById("processNiif").addEventListener("click", async () => {
+      const file = document.getElementById("niifFile").files[0];
+      const message = document.getElementById("niifMessage");
+      if (!file) { message.className = "notice warn"; message.textContent = "Selecciona un balance de prueba."; return; }
+      try {
+        message.className = "notice info"; message.textContent = "Preparando estados financieros...";
+        const parsed = await parseExcel(file);
+        const accounts = parsed.accounts;
+        const metrics = summarize(accounts);
+        const company = document.getElementById("companyName").value.trim() || "Entidad reportante";
+        const group = document.getElementById("standardGroup").value;
+        renderMetrics(document.getElementById("niifMetrics"), metrics);
+        const esf = [...byAccount(accounts, "Activo", ["1"]), ...byAccount(accounts, "Pasivo", ["2"]), ...byAccount(accounts, "Patrimonio", ["3"])];
+        const result = [...byAccount(accounts, "Ingresos", ["4"]), ...byAccount(accounts, "Gastos", ["5"]), ...byAccount(accounts, "Costos", ["6", "7"])];
+        const flow = [
+          { Concepto: "Resultado del periodo", Valor: metrics.result },
+          { Concepto: "Flujo neto estimado de operacion", Valor: metrics.result - metrics.assets + metrics.liabilities },
+          { Concepto: "Flujo de inversion por clasificar", Valor: -metrics.assets },
+          { Concepto: "Flujo de financiacion por clasificar", Valor: metrics.liabilities + metrics.equity }
+        ];
+        const equity = [
+          { Concepto: "Patrimonio contable de cierre", Valor: metrics.equity },
+          { Concepto: "Resultado del periodo", Valor: metrics.result },
+          { Concepto: "Patrimonio ajustado con resultado", Valor: metrics.equity + metrics.result }
+        ];
+        const notes = [
+          { Nota: "Base de preparacion", Contenido: `Estados preparados para ${company} bajo ${group}.` },
+          { Nota: "Moneda funcional", Contenido: "Validar moneda, redondeo y unidad de presentacion antes de emitir." },
+          { Nota: "Politicas contables", Contenido: "Completar reconocimiento, medicion inicial, medicion posterior, deterioro y baja en cuentas." },
+          { Nota: "Estimaciones", Contenido: "Documentar deterioro de cartera, vida util, provisiones, impuestos y contingencias." },
+          { Nota: "Hechos posteriores", Contenido: "Confirmar hechos relevantes entre fecha de corte y autorizacion." }
+        ];
+        const checklist = [
+          { Requisito: "Estado de situacion financiera", Preparado: Math.abs(metrics.difference) <= Math.max(1000, metrics.assets * 0.00001) ? "Si" : "Revisar", Observacion: "Validar cuadre contable." },
+          { Requisito: "Estado de resultado integral", Preparado: "Si", Observacion: "Clasificar ingresos, costos, gastos y ORI si aplica." },
+          { Requisito: "Estado de flujos de efectivo", Preparado: "Preliminar", Observacion: "Requiere balance comparativo para version definitiva." },
+          { Requisito: "Cambios en patrimonio", Preparado: "Preliminar", Observacion: "Completar aportes, dividendos, reservas y ajustes." },
+          { Requisito: "Notas", Preparado: "Preliminar", Observacion: "Completar revelaciones y soportes." },
+          { Requisito: "Firmas y autorizacion", Preparado: "Pendiente", Observacion: "Pendiente certificacion, aprobacion y fecha de emision." }
+        ];
+        renderTabs(document.getElementById("niifOutput"), [
+          { label: "Situacion financiera", html: renderTable(esf, ["Rubro", "Codigo", "Cuenta", "Valor"]) },
+          { label: "Resultado integral", html: renderTable(result, ["Rubro", "Codigo", "Cuenta", "Valor"]) },
+          { label: "Flujo efectivo", html: renderTable(flow, ["Concepto", "Valor"]) },
+          { label: "Patrimonio", html: renderTable(equity, ["Concepto", "Valor"]) },
+          { label: "Notas", html: renderTable(notes, ["Nota", "Contenido"]) },
+          { label: "Control", html: renderTable(checklist, ["Requisito", "Preparado", "Observacion"]) }
+        ]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows([{ Empresa: company, "Grupo NIIF": group, Archivo: file.name, Periodo: parsed.accounts[0]?.period || "" }]), "Portada");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows([metrics]), "Indicadores");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(esf), "ESF");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(result), "Resultado integral");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(flow), "Flujo efectivo");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(equity), "Cambios patrimonio");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(notes), "Notas");
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(checklist), "Control NIIF");
+        state.niifWorkbook = wb;
+        state.niifPrintHtml = `<h1>Estados financieros bajo NIIF</h1><p><strong>${escapeHtml(company)}</strong><br>${escapeHtml(group)}</p>${document.getElementById("niifOutput").innerHTML}`;
+        document.getElementById("downloadNiif").disabled = false;
+        document.getElementById("printNiif").disabled = false;
+        message.className = Math.abs(metrics.difference) <= Math.max(1000, metrics.assets * 0.00001) ? "notice ok" : "notice warn";
+        message.textContent = Math.abs(metrics.difference) <= Math.max(1000, metrics.assets * 0.00001) ? "Estados NIIF preparados con cuadre dentro de tolerancia." : "Estados preparados, pero hay diferencia de cuadre para revisar.";
+      } catch (error) {
+        message.className = "notice error"; message.textContent = error.message;
+      }
+    });
+
+    document.getElementById("downloadNiif").addEventListener("click", () => {
+      if (state.niifWorkbook) XLSX.writeFile(state.niifWorkbook, "Estados_financieros_NIIF.xlsx");
+    });
+
+    document.getElementById("printNiif").addEventListener("click", () => {
+      const win = window.open("", "_blank");
+      win.document.write(`<html><head><title>Estados financieros NIIF</title><style>body{font-family:Arial,sans-serif;margin:32px;color:#172033}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #d9dee8;padding:8px;font-size:12px;text-align:left}.tabs{display:none}.tab-panel{display:block!important}</style></head><body>${state.niifPrintHtml}</body></html>`);
+      win.document.close();
+      win.print();
+    });
+  </script>
+</body>
+</html>
